@@ -1,0 +1,44 @@
+name: Build and deploy script
+
+on:
+  push:
+    branches:
+      - magellan
+
+jobs:
+  deploy-script:
+    runs-on: self-hosted
+    env:
+      http_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
+      https_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
+      no_proxy: 'cloud.local,sanofi.com,docker'
+    steps:
+      - uses: Sanofi-Shared-GitHub-Apps/gh-action-sanofi-certs@main
+      - name: Setup pipe CLI
+        run: |
+          cd ~/
+          curl https://magellan.sanofi.com/pipeline/pipe.tar.gz -o pipe.tar.gz
+          echo "Downloaded Pipe tarball"
+          tar -zxf pipe.tar.gz
+          rm -f pipe.tar.gz
+          echo "Setting up pipe"
+          ~/pipe/pipe configure --auth-token ${{ secrets.API_TOKEN_MAGELLAN }} --api ${{ secrets.API_URL_MAGELLAN }} --timezone local --proxy ""
+      - name: Setup Magellan certificate
+        run: |
+          sudo mkdir -p /etc/docker/certs.d/magellan-docker.sanofi.com:443
+          curl --header 'Authorization: Bearer ${{ secrets.MAGELLAN_DOCKER_PASSWORD }}' -o ca.crt https://magellan.sanofi.com/pipeline/restapi/dockerRegistry/1/cert
+          sudo cp ca.crt /etc/docker/certs.d/magellan-docker.sanofi.com:443/ca.crt
+          cat /etc/docker/certs.d/magellan-docker.sanofi.com:443/ca.crt
+      - name: Login to Magellan Docker registry
+        uses: docker/login-action@v2
+        with:
+          registry: magellan-docker.sanofi.com:443
+          username: ${{secrets.MAGELLAN_USERNAME}}
+          password: ${{secrets.MAGELLAN_DOCKER_PASSWORD}}
+      - name: Setup buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build image
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: i0542459/cid-dynamic-borrowing:$GITHUB_SHA,i0542459/cid-dynamic-borrowing:latest
