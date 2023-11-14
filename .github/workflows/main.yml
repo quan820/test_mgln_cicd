@@ -1,13 +1,10 @@
 name: Build and deploy script
 
-on:
-  push:
-    branches:
-      - magellan
+on:[workflow_dispatch]
 
 jobs:
   deploy-script:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       http_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
       https_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
