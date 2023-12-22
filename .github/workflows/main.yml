@@ -5,13 +5,13 @@ on:
 
 jobs:
   deploy-script:
-    runs-on: ubuntu-latest
-    env:
-      http_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
-      https_proxy: 'http://emea-aws-webproxy.service.cloud.local:3128'
-      no_proxy: 'cloud.local,sanofi.com,docker'
+    runs-on: [self-hosted, atmos-aws-shared-gh-runner]
     steps:
-      - uses: Sanofi-Shared-GitHub-Apps/gh-action-sanofi-certs@main
+      - uses: Sanofi-InnerSource/github-action-sanofi-bootstrap@main
+        with:
+          root_ca: true         # whether to install the root CA
+          squid_proxy: false    # configure the old Squid proxy
+          zscaler_proxy: true   # configure the new ZScaler proxy
       - name: Setup pipe CLI
         run: |
           cd ~/
