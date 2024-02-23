@@ -1,42 +1,73 @@
-name: Build and deploy script
+name: Push image to Magellan
 
+# Choose what events trigger your workflow
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
 
 jobs:
-  deploy-script:
-    runs-on: [self-hosted, atmos-aws-shared-gh-runner]
+  build-push-image:
+    runs-on: atmos-aws-arc-runner-set
+    container:
+      # Choose desired image for the runner
+      image: magellan-docker.sanofi.com:443/library/centos
+      credentials:
+        username: I0300849
+        password: ${{ secrets.API_TOKEN_MAGELLAN }}
+      # The certs folder needs to be mounted as a volume when the container starts
+      volumes:
+        - /etc/docker/certs.d/magellan-docker.sanofi.com:/etc/docker/certs.d/magellan-docker.sanofi.com
     steps:
-      - uses: Sanofi-InnerSource/github-action-sanofi-bootstrap@main
-        with:
-          root_ca: true         # whether to install the root CA
-          squid_proxy: false    # configure the old Squid proxy
-          zscaler_proxy: true   # configure the new ZScaler proxy
-      - name: Setup pipe CLI
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Here I use a custom GitHub Action I developed, users can just provide shell commands
+      - name: Install docker
+        uses: Sanofi-GitHub/sih-github-actions/setup-docker@main
+
+      - name: Download certificate
+        shell: bash
+        env:
+          API_URL: https://magellan.sanofi.com/pipeline/restapi
+        # The last command is needed for pushing
         run: |
-          cd ~/
-          curl https://magellan.sanofi.com/pipeline/pipe.tar.gz -o pipe.tar.gz
-          echo "Downloaded Pipe tarball"
-          tar -zxf pipe.tar.gz
-          rm -f pipe.tar.gz
-          echo "Setting up pipe"
-          ~/pipe/pipe configure --auth-token ${{ secrets.API_TOKEN_MAGELLAN }} --api ${{ secrets.API_URL_MAGELLAN }} --timezone local --proxy ""
-      - name: Setup Magellan certificate
-        run: |
-          sudo mkdir -p /etc/docker/certs.d/magellan-docker.sanofi.com:443
-          curl --header 'Authorization: Bearer ${{ secrets.MAGELLAN_DOCKER_PASSWORD }}' -o ca.crt https://magellan.sanofi.com/pipeline/restapi/dockerRegistry/1/cert
-          sudo cp ca.crt /etc/docker/certs.d/magellan-docker.sanofi.com:443/ca.crt
-          cat /etc/docker/certs.d/magellan-docker.sanofi.com:443/ca.crt
-      - name: Login to Magellan Docker registry
-        uses: docker/login-action@v2
+          curl -X GET "$API_URL/dockerRegistry/1/cert" -o ca.crt \
+          -H "Authorization: Bearer ${{ secrets.API_TOKEN_MAGELLAN }}"
+          cp ca.crt /etc/docker/certs.d/magellan-docker.sanofi.com/ca.crt
+          cat /etc/docker/certs.d/magellan-docker.sanofi.com/ca.crt >> /etc/ssl/certs/ca-certificates.crt
+
+      # Here I use docker/login-action, users can also use `docker login` if they want
+      - name: Login to Magellan registry
+        uses: docker/login-action@v3
         with:
-          registry: magellan-docker.sanofi.com:443
-          username: ${{secrets.MAGELLAN_USERNAME}}
-          password: ${{secrets.MAGELLAN_DOCKER_PASSWORD}}
-      - name: Setup buildx
-        uses: docker/setup-buildx-action@v2
+          registry: magellan-docker.sanofi.com
+          username: I0300849
+          password: ${{ secrets.API_TOKEN_MAGELLAN }}
+
       - name: Build image
-        uses: docker/build-push-action@v4
-        with:
-          push: true
-          tags: i0542459/cid-dynamic-borrowing:$GITHUB_SHA,i0542459/cid-dynamic-borrowing:latest
+        run: docker build . -t cicd_test:latest
+
+      - name: Push image
+        run: |
+          docker tag cicd_test:latest magellan-docker.sanofi.com/i0300849/cicd_test:latest
+          docker push magellan-docker.sanofi.com/i0300849/cicd_test:latest
+
+      # # Using these actions doesn't work. The push runs without errors but then the image is not visible in the Magellan registry
+      # - name: Setup buildx
+      #   uses: docker/setup-buildx-action@v2
+      #   with:
+      #     config-inline: |
+      #       [registry."magellan-docker.sanofi.com"]
+      #         ca=["/etc/docker/certs.d/magellan-docker.sanofi.com/ca.crt"]
+
+      # - name: Build image
+      #   uses: docker/build-push-action@v4
+      #   with:
+      #     context: .
+      #     file: Dockerfile.magellan
+      #     push: true
+      #     tags: magellan-docker.sanofi.com/i0542459/frexalimab-sims-test2:latest
